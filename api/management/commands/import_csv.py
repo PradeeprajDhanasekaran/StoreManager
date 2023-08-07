@@ -1,4 +1,6 @@
 # import_csv.py (using pandas with batching)
+from datetime import datetime, timezone
+
 import pandas as pd
 from django.core.management.base import BaseCommand
 from api.models import StoreStatus
@@ -8,15 +10,15 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('csv_file', type=str, help='Path to the CSV file')
-        parser.add_argument('--batch_size', type=int, default=1000, help='Batch size for insertion')
+        parser.add_argument('--batch_size', type=int, default=2, help='Batch size for insertion')
 
     def handle(self, *args, **kwargs):
-        csv_file = 'dataSource\store status.csv'
+        csv_file = '/home/softsuave/Desktop/StoreManager/dataSource/storestatus.csv'
         batch_size = kwargs['batch_size']
 
         # Use Pandas to read the CSV file and convert it into a DataFrame
         df = pd.read_csv(csv_file)
-
+        df['timestamp_utc'] = df['timestamp_utc'].apply(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S.%f %Z").replace(tzinfo=timezone.utc))
         # Get the total number of records
         total_records = len(df)
 
