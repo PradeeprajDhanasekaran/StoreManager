@@ -20,31 +20,103 @@ def generate_report(report_id):
     new_status = ReportStatus.objects.create(report_id=report_id, status=0, start_time=timezone.now())
     time.sleep(15)
     print('task ended')
+   # --------------------------------------------------------------------------
+import pandas as pd
+from datetime import datetime, timedelta
+import pytz
+from django.db import connection
+from myapp.models import StoreStatus, StoreHours, StoreTimezone
 
-    stores = StoreHours.objects.all()
-    store_status_data = StoreStatus.objects.all()
+# Define your Django models
+# ...
 
-    # Initialize an empty DataFrame to store the report data
-    report_data = pd.DataFrame(columns=['store_id', 'uptime_last_hour', 'uptime_last_day', 'uptime_last_week', 'downtime_last_hour', 'downtime_last_day', 'downtime_last_week'])
+# Function to generate the report
+def generate_report():
+    # Get the current time in UTC (using the max timestamp among all observations)
+    max_timestamp = StoreStatus.objects.latest('timestamp_utc').timestamp_utc
+    current_time_utc = max_timestamp
 
-    # Implement the logic to compute uptime and downtime for each store based on the provided data
-    for store in stores:
+    # Retrieve data from the database
+    store_activity_data = StoreStatus.objects.all()
+    business_hours_data = StoreHours.objects.all()
+    timezone_data = StoreTimezone.objects.all()
+
+    # Calculate time intervals for the last hour, last day, and last week
+    last_hour = current_time_utc - timedelta(hours=1)
+    last_day = current_time_utc - timedelta(days=1)
+    last_week = current_time_utc - timedelta(weeks=1)
+
+    # Calculate business hours extrapolation based on observations
+    def extrapolate_time_series(observations, start_time, end_time):
+        if not observations:
+            return []
+
+        intervals = []
+        current_time = start_time
+        for obs in observations:
+            interval = (current_time, obs['timestamp_utc'], obs['status'])
+            intervals.append(interval)
+            current_time = obs['timestamp_utc']
+        
+        if current_time < end_time:
+            intervals.append((current_time, end_time, observations[-1]['status']))
+
+        time_series = []
+        for start, end, status in intervals:
+            time_series.extend(pd.date_range(start, end, freq='T').tolist())
+        
+        return time_series
+
+    # Calculate extrapolated uptime and downtime using business hours
+    def calculate_extrapolated_uptime_downtime(start_time, end_time, time_series):
+        total_time = (end_time - start_time).total_seconds() / 60
+        active_time = 0
+        for timestamp in time_series:
+            if start_time.time() <= timestamp.time() <= end_time.time():
+                active_time += 1
+        
+        uptime = active_time
+        downtime = total_time - active_time
+        
+        return uptime, downtime
+
+    # Generate the report
+    report_data = []
+    for store in business_hours_data:
         store_id = store.store_id
-
-        # Get the business hours for the store
-        business_hours = (store.start_time_local, store.end_time_local)
-
-        # Filter the status data for the current store
-        store_status_data_filtered = store_status_data.filter(store_id=store_id)
-
-        # Calculate uptime and downtime based on the provided data
-        ...
-
-        # Extrapolate the data to cover the entire time interval (e.g., last hour, last day, last week)
-        ...
-
-        # Store the computed results in the report_data DataFrame
-        report_data = report_data.append({
+        business_start = datetime.combine(current_time_utc.date(), store.start_time_local)
+        business_end = datetime.combine(current_time_utc.date(), store.end_time_local)
+        obs_within_business_hours = store_activity_data.filter(
+            store_id=store_id,
+            timestamp_utc__gte=business_start,
+            timestamp_utc__lte=business_end
+        ).order_by('timestamp_utc').values('timestamp_utc', 'status')
+        
+        time_series = extrapolate_time_series(
+            obs_within_business_hours,
+            business_start,
+            business_end
+        )
+        
+        uptime_last_hour, downtime_last_hour = calculate_extrapolated_uptime_downtime(
+            last_hour,
+            current_time_utc,
+            time_series
+        )
+        
+        uptime_last_day, downtime_last_day = calculate_extrapolated_uptime_downtime(
+            last_day,
+            current_time_utc,
+            time_series
+        )
+        
+        uptime_last_week, downtime_last_week = calculate_extrapolated_uptime_downtime(
+            last_week,
+            current_time_utc,
+            time_series
+        )
+        
+        report_data.append({
             'store_id': store_id,
             'uptime_last_hour': uptime_last_hour,
             'uptime_last_day': uptime_last_day,
@@ -52,11 +124,18 @@ def generate_report(report_id):
             'downtime_last_hour': downtime_last_hour,
             'downtime_last_day': downtime_last_day,
             'downtime_last_week': downtime_last_week,
-        }, ignore_index=True)
+        })
 
-    # You now have the report data in the report_data DataFrame
+    return report_data
 
-    # Convert the report_data DataFrame to a CSV file and save it locally
+# Call the generate_report function to generate the report
+report = generate_report()
+
+# Print the generated report
+for entry in report:
+    print(entry)
+
+   # --------------------------------------------------------------------------
     report_csv_file = 'report.csv'
     report_data.to_csv(report_csv_file, index=False)
 
