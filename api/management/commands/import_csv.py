@@ -1,35 +1,58 @@
 # import_csv.py (using pandas with batching)
 from datetime import datetime, timezone
-
+from StoreManager.settings import BASE_DIR 
 import pandas as pd
 from django.core.management.base import BaseCommand
-from api.models import StoreStatus
+from api.models import StoreStatus , StoreTimezone,StoreHours
 
 class Command(BaseCommand):
     help = 'Import data from CSV file'
 
-    def add_arguments(self, parser):
-        parser.add_argument('csv_file', type=str, help='Path to the CSV file')
-        parser.add_argument('--batch_size', type=int, default=2, help='Batch size for insertion')
+    # def add_arguments(self, parser):
+    #     parser.add_argument('csv_file', type=str, help='Path to the CSV file')
+    #     parser.add_argument('--batch_size', type=int, default=2, help='Batch size for insertion')
 
-    def handle(self, *args, **kwargs):
-        csv_file = '/home/softsuave/Desktop/StoreManager/dataSource/storestatus.csv'
-        batch_size = kwargs['batch_size']
+    def handle_store_status(self, *args, **kwargs):
+        csv_file =BASE_DIR/ 'dataSource/store status.csv'
+        batch_size =4000
 
-        # Use Pandas to read the CSV file and convert it into a DataFrame
         df = pd.read_csv(csv_file)
         df['timestamp_utc'] = df['timestamp_utc'].apply(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S.%f %Z").replace(tzinfo=timezone.utc))
-        # Get the total number of records
         total_records = len(df)
 
-        # Use batching for data insertion
         for i in range(0, total_records, batch_size):
             batch_data = df.iloc[i : i + batch_size].to_dict(orient='records')
 
-            # Use Django's bulk_create() to insert data into the database for each batch
             StoreStatus.objects.bulk_create([StoreStatus(**item) for item in batch_data])
 
-            # Print progress
             self.stdout.write(f'Processed {min(i + batch_size, total_records)} records out of {total_records}')
+        self.stdout.write(self.style.SUCCESS('Store status data imported successfully!'))
 
-        self.stdout.write(self.style.SUCCESS('Data imported successfully!'))
+    def handle_store_hours(self):
+        menu_hour_csv =BASE_DIR/ 'dataSource/Menu hours.csv'
+        batch_size =4000
+        df = pd.read_csv(menu_hour_csv)
+        df['start_time_local'] = df['start_time_local'].apply(lambda x: datetime.strptime(x, "%H:%M:%S"))
+        df['end_time_local'] = df['end_time_local'].apply(lambda x: datetime.strptime(x, "%H:%M:%S"))
+        
+        total_records = len(df)
+        for i in range(0, total_records, batch_size):
+            batch_data = df.iloc[i : i + batch_size].to_dict(orient='records')
+
+            StoreHours.objects.bulk_create([StoreHours(**item) for item in batch_data])
+
+            self.stdout.write(f'Processed {min(i + batch_size, total_records)} records out of {total_records}')
+        self.stdout.write(self.style.SUCCESS('Store hours data imported successfully!'))
+
+    def handle_store_timezone(self):
+        menu_hour_csv =BASE_DIR/ 'dataSource/timeZones.csv'
+        batch_size =4000
+        df = pd.read_csv(menu_hour_csv)       
+        total_records = len(df)
+        for i in range(0, total_records, batch_size):
+            batch_data = df.iloc[i : i + batch_size].to_dict(orient='records')
+
+            StoreTimezone.objects.bulk_create([StoreTimezone(**item) for item in batch_data])
+
+            self.stdout.write(f'Processed {min(i + batch_size, total_records)} records out of {total_records}')
+        self.stdout.write(self.style.SUCCESS('Timezone data imported successfully!'))
